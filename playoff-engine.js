@@ -276,7 +276,8 @@
 
   function teamsWithProjectedNrr(predictions) {
     const affected = new Set();
-    for (const fixtureId of Object.keys(predictions || {})) {
+    for (const [fixtureId, outcome] of Object.entries(predictions || {})) {
+      if (!outcome || outcome.type !== "win") continue;
       const fixture = fixtureById[fixtureId];
       if (!fixture) continue;
       affected.add(fixture.teams[0]);

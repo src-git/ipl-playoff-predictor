@@ -55,6 +55,14 @@ function testPredictedResultMarksAffectedNrrTeams() {
   assert.deepStrictEqual([...affected].sort(), ["GT", "KKR"]);
 }
 
+function testTieAndNoResultDoNotMarkNrrStale() {
+  let affected = engine.teamsWithProjectedNrr({ "GT-KKR": { type: "tie" } });
+  assert.deepStrictEqual([...affected], []);
+
+  affected = engine.teamsWithProjectedNrr({ "GT-KKR": { type: "nr" } });
+  assert.deepStrictEqual([...affected], []);
+}
+
 function testTieAndNoResultGiveOnePointEach() {
   let standings = engine.computeStandings({ "GT-KKR": { type: "tie" } });
   assert.strictEqual(byId(standings, "GT").points, 17);
@@ -150,6 +158,7 @@ testCurrentPointsMatchScreenshot();
 testCurrentNrrMatchesScreenshot();
 testPredictionScoringAndReciprocalCells();
 testPredictedResultMarksAffectedNrrTeams();
+testTieAndNoResultDoNotMarkNrrStale();
 testTieAndNoResultGiveOnePointEach();
 testCutoffTieRequiresNrr();
 testTopTwoTieRequiresNrrForQualifierAdvantage();
