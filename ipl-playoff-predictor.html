@@ -1,0 +1,837 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>IPL Playoff Predictor</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --bg: #f6f7f9;
+      --panel: #ffffff;
+      --line: #d8dde6;
+      --muted-line: #ebedf2;
+      --text: #151820;
+      --muted: #536078;
+      --green: #c5f5d3;
+      --green-strong: #2fbd59;
+      --red: #ffd7d2;
+      --red-strong: #ec5146;
+      --amber: #ffe3a5;
+      --amber-strong: #b67300;
+      --grey: #eef0f3;
+      --blue: #dbeafe;
+      --blue-strong: #2563eb;
+      --shadow: 0 12px 30px rgba(26, 32, 44, 0.08);
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--text);
+    }
+
+    button {
+      font: inherit;
+    }
+
+    .page {
+      max-width: 1800px;
+      margin: 0 auto;
+      padding: 20px;
+    }
+
+    .topbar {
+      display: flex;
+      justify-content: space-between;
+      gap: 16px;
+      align-items: flex-start;
+      margin-bottom: 16px;
+    }
+
+    h1 {
+      margin: 0 0 6px;
+      font-size: 28px;
+      line-height: 1.15;
+      letter-spacing: 0;
+    }
+
+    .subtitle {
+      margin: 0;
+      color: var(--muted);
+      font-size: 14px;
+    }
+
+    .actions {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+      justify-content: flex-end;
+    }
+
+    .action-button {
+      border: 1px solid var(--line);
+      background: var(--panel);
+      border-radius: 8px;
+      padding: 8px 12px;
+      cursor: pointer;
+      font-weight: 650;
+      color: var(--text);
+    }
+
+    .action-button:hover {
+      border-color: #aeb7c7;
+    }
+
+    .legend {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+      margin-bottom: 16px;
+    }
+
+    .import-panel {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      box-shadow: var(--shadow);
+      padding: 14px 16px;
+      margin-bottom: 16px;
+      display: grid;
+      gap: 10px;
+    }
+
+    .import-panel textarea {
+      width: 100%;
+      min-height: 96px;
+      resize: vertical;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 10px;
+      font: 13px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      color: var(--text);
+      background: #fbfcfe;
+    }
+
+    .import-actions {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+      align-items: center;
+    }
+
+    .import-status {
+      color: var(--muted);
+      font-size: 13px;
+      font-weight: 650;
+    }
+
+    .pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      border-radius: 999px;
+      padding: 5px 9px;
+      font-size: 12px;
+      font-weight: 750;
+      border: 1px solid rgba(0, 0, 0, 0.08);
+      white-space: nowrap;
+    }
+
+    .pill.win {
+      background: var(--green);
+      color: #116131;
+    }
+
+    .pill.loss {
+      background: var(--red);
+      color: #8b241f;
+    }
+
+    .pill.tie {
+      background: var(--amber);
+      color: #704b00;
+    }
+
+    .pill.nr,
+    .pill.unset {
+      background: #ffffff;
+      color: #303746;
+    }
+
+    .layout {
+      display: grid;
+      grid-template-columns: minmax(820px, 1fr) 380px;
+      gap: 16px;
+      align-items: start;
+    }
+
+    .panel {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      box-shadow: var(--shadow);
+      overflow: hidden;
+    }
+
+    .panel-header {
+      padding: 14px 16px;
+      border-bottom: 1px solid var(--muted-line);
+      display: flex;
+      justify-content: space-between;
+      gap: 12px;
+      align-items: center;
+    }
+
+    .panel-title {
+      margin: 0;
+      font-size: 16px;
+      letter-spacing: 0;
+    }
+
+    .table-wrap {
+      overflow-x: auto;
+    }
+
+    table {
+      border-collapse: collapse;
+      width: 100%;
+    }
+
+    .predictor-table {
+      min-width: 1420px;
+    }
+
+    th,
+    td {
+      border-bottom: 1px solid var(--muted-line);
+      border-right: 1px solid var(--muted-line);
+      padding: 0;
+      vertical-align: middle;
+    }
+
+    th:last-child,
+    td:last-child {
+      border-right: 0;
+    }
+
+    th {
+      background: #f0f2f5;
+      color: #525b72;
+      font-size: 12px;
+      text-align: center;
+      font-weight: 800;
+      height: 40px;
+    }
+
+    .team-head {
+      width: 270px;
+      text-align: left;
+      padding-left: 14px;
+      position: sticky;
+      left: 0;
+      z-index: 2;
+    }
+
+    .team-cell {
+      position: sticky;
+      left: 0;
+      z-index: 1;
+      background: #fff;
+      min-width: 270px;
+      padding: 10px 12px;
+    }
+
+    .team-name {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      font-weight: 850;
+      white-space: nowrap;
+    }
+
+    .rank {
+      width: 24px;
+      color: var(--muted);
+      text-align: right;
+      font-size: 13px;
+      font-weight: 700;
+    }
+
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 36px;
+      height: 28px;
+      border-radius: 6px;
+      background: #f3f4f7;
+      color: #222936;
+      font-size: 12px;
+      font-weight: 900;
+      border: 1px solid #e0e4ea;
+    }
+
+    .slot {
+      width: 86px;
+      height: 70px;
+      text-align: center;
+      line-height: 1.15;
+    }
+
+    .slot-content {
+      display: flex;
+      min-height: 70px;
+      padding: 6px 5px;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 4px;
+    }
+
+    .slot.completed.win {
+      background: var(--green);
+    }
+
+    .slot.completed.loss {
+      background: var(--red);
+    }
+
+    .slot.completed.tie,
+    .slot.completed.nr {
+      background: #fbfbfc;
+    }
+
+    .future-button {
+      width: 100%;
+      min-height: 70px;
+      border: 0;
+      background: var(--grey);
+      cursor: pointer;
+      color: inherit;
+      padding: 0;
+    }
+
+    .future-button:hover {
+      outline: 2px solid #9aa6b8;
+      outline-offset: -2px;
+    }
+
+    .future-button.win {
+      background: var(--green);
+    }
+
+    .future-button.loss {
+      background: var(--red);
+    }
+
+    .future-button.tie {
+      background: var(--amber);
+    }
+
+    .future-button.nr {
+      background: #ffffff;
+    }
+
+    .points {
+      font-size: 20px;
+      line-height: 1;
+      font-weight: 900;
+      color: #10131a;
+    }
+
+    .date {
+      font-size: 11px;
+      color: #1f2531;
+      font-weight: 800;
+    }
+
+    .opponent {
+      font-size: 12px;
+      color: #4c566f;
+      font-weight: 700;
+    }
+
+    .result-text {
+      font-size: 12px;
+      font-weight: 900;
+      color: #222936;
+    }
+
+    .projection-cell {
+      width: 90px;
+      text-align: center;
+      font-size: 22px;
+      font-weight: 950;
+      background: #fbfcfe;
+    }
+
+    .analysis {
+      display: grid;
+      gap: 16px;
+    }
+
+    .side-section {
+      padding: 14px 16px 16px;
+      border-bottom: 1px solid var(--muted-line);
+    }
+
+    .side-section:last-child {
+      border-bottom: 0;
+    }
+
+    .side-section h3 {
+      margin: 0 0 10px;
+      font-size: 14px;
+      letter-spacing: 0;
+    }
+
+    .standings-list {
+      display: grid;
+      gap: 6px;
+    }
+
+    .standing-row {
+      display: grid;
+      grid-template-columns: 26px 1fr auto;
+      gap: 8px;
+      align-items: center;
+      border: 1px solid var(--muted-line);
+      border-radius: 8px;
+      padding: 8px;
+      font-size: 13px;
+    }
+
+    .standing-row.top-four {
+      border-color: #a2dfb5;
+      background: #f1fbf4;
+    }
+
+    .standing-rank {
+      color: var(--muted);
+      font-weight: 850;
+      text-align: right;
+    }
+
+    .standing-team {
+      font-weight: 800;
+    }
+
+    .standing-points {
+      font-weight: 950;
+    }
+
+    .nrr-value.stale {
+      font-style: italic;
+    }
+
+    .fixtures-list {
+      display: grid;
+      gap: 8px;
+    }
+
+    .fixture-row {
+      border: 1px solid var(--muted-line);
+      border-radius: 8px;
+      padding: 9px;
+      display: grid;
+      gap: 7px;
+    }
+
+    .fixture-title {
+      display: flex;
+      justify-content: space-between;
+      gap: 8px;
+      font-size: 13px;
+      font-weight: 850;
+    }
+
+    .fixture-tags {
+      display: flex;
+      gap: 6px;
+      flex-wrap: wrap;
+    }
+
+    .status {
+      border-radius: 999px;
+      padding: 4px 7px;
+      font-size: 11px;
+      font-weight: 850;
+      border: 1px solid rgba(0, 0, 0, 0.08);
+    }
+
+    .status.must-win {
+      background: var(--red);
+      color: #8b241f;
+    }
+
+    .status.needs-help {
+      background: var(--amber);
+      color: #704b00;
+    }
+
+    .status.not-must-win {
+      background: var(--green);
+      color: #116131;
+    }
+
+    .status.eliminated {
+      background: #eef0f3;
+      color: #596172;
+    }
+
+    .status.prediction-set {
+      background: var(--blue);
+      color: #1848a3;
+    }
+
+    .status.played {
+      background: #eef0f3;
+      color: #596172;
+    }
+
+    .note {
+      color: var(--muted);
+      font-size: 12px;
+      line-height: 1.45;
+      margin: 8px 0 0;
+    }
+
+    @media (max-width: 1100px) {
+      .layout {
+        grid-template-columns: 1fr;
+      }
+
+      .analysis {
+        grid-template-columns: 1fr;
+      }
+    }
+
+    @media (max-width: 720px) {
+      .page {
+        padding: 12px;
+      }
+
+      .topbar {
+        flex-direction: column;
+      }
+
+      .actions {
+        justify-content: flex-start;
+      }
+
+      h1 {
+        font-size: 23px;
+      }
+    }
+  </style>
+</head>
+<body>
+  <main class="page">
+    <div class="topbar">
+      <div>
+        <h1>IPL Playoff Predictor</h1>
+        <p class="subtitle">Click a grey future cell to cycle: Win, Loss, Tie, No Result, unset. Opponent cells update automatically.</p>
+      </div>
+      <div class="actions">
+        <button class="action-button" id="resetBtn" type="button">Reset predictions</button>
+      </div>
+    </div>
+
+    <div class="legend" aria-label="Legend">
+      <span class="pill win">Win +2</span>
+      <span class="pill loss">Loss +0</span>
+      <span class="pill tie">Tie +1 each</span>
+      <span class="pill nr">No result +1 each</span>
+      <span class="pill unset">Grey = future unset</span>
+    </div>
+
+    <section class="import-panel" aria-label="Import standings">
+      <div>
+        <h2 class="panel-title">Import latest standings</h2>
+        <p class="subtitle">Paste copied table text or OCR text from a standings screenshot. The parser reads team, PTS, NRR, and Next.</p>
+      </div>
+      <textarea id="standingsImport" placeholder="Example: 1 GUJARAT TITANS 12 8 4 0 0 16 0.551 ... vs KKR, CSK ..."></textarea>
+      <div class="import-actions">
+        <button class="action-button" id="importBtn" type="button">Apply import</button>
+        <button class="action-button" id="clearImportBtn" type="button">Clear import</button>
+        <span class="import-status" id="importStatus">Using built-in screenshot data.</span>
+      </div>
+    </section>
+
+    <section class="layout">
+      <div class="panel">
+        <div class="panel-header">
+          <h2 class="panel-title">Points Summary</h2>
+          <span class="subtitle">Current NRR shown; italic NRR needs projected-score update</span>
+        </div>
+        <div class="table-wrap">
+          <table class="predictor-table" id="predictorTable"></table>
+        </div>
+      </div>
+
+      <aside class="panel analysis">
+        <div class="side-section">
+          <h3>Projected Standings</h3>
+          <div class="standings-list" id="standingsList"></div>
+          <p class="note" id="cutoffNote"></p>
+        </div>
+        <div class="side-section">
+          <h3>Remaining Match Pressure</h3>
+          <div class="fixtures-list" id="fixturesList"></div>
+          <p class="note">Must-win labels are recalculated from the current predictions. Tie/no-result are treated as one point each.</p>
+        </div>
+      </aside>
+    </section>
+  </main>
+
+  <script src="playoff-engine.js"></script>
+  <script>
+    const engine = window.PlayoffEngine;
+    let predictions = {};
+
+    const table = document.getElementById("predictorTable");
+    const standingsList = document.getElementById("standingsList");
+    const fixturesList = document.getElementById("fixturesList");
+    const cutoffNote = document.getElementById("cutoffNote");
+    const resetBtn = document.getElementById("resetBtn");
+    const importInput = document.getElementById("standingsImport");
+    const importBtn = document.getElementById("importBtn");
+    const clearImportBtn = document.getElementById("clearImportBtn");
+    const importStatus = document.getElementById("importStatus");
+    let importedStandings = null;
+    let futureFixtureIds = null;
+
+    function classForResult(result) {
+      if (result === "W") return "win";
+      if (result === "L") return "loss";
+      if (result === "T") return "tie";
+      if (result === "NR") return "nr";
+      return "";
+    }
+
+    function statusText(status) {
+      if (status === "must-win") return "Must win";
+      if (status === "needs-help") return "Needs help if lost";
+      if (status === "not-must-win") return "Not must-win";
+      if (status === "eliminated") return "Eliminated";
+      if (status === "prediction-set") return "Prediction set";
+      if (status === "played") return "Played";
+      if (status === "top-two") return "Top 2";
+      if (status === "top-two-nrr") return "Top 2 NRR needed";
+      if (status === "playoff") return "Top 4";
+      if (status === "playoff-nrr") return "Top 4 NRR needed";
+      if (status === "nrr") return "NRR needed";
+      if (status === "qualified") return "Top 4";
+      return status;
+    }
+
+    function setPredictionFromCell(fixtureId, teamId) {
+      if (futureFixtureIds && !futureFixtureIds.has(fixtureId)) return;
+      const fixture = engine.fixtureById[fixtureId];
+      const next = engine.nextOutcomeForTeam(predictions[fixtureId], fixture, teamId);
+      predictions = { ...predictions };
+      if (next) {
+        predictions[fixtureId] = next;
+      } else {
+        delete predictions[fixtureId];
+      }
+      render();
+    }
+
+    function renderTable() {
+      const rows = engine.buildTeamRows(predictions, importedStandings, futureFixtureIds);
+      const maxSlots = Math.max(...rows.map((row) => row.slots.length));
+      const headCells = Array.from({ length: maxSlots }, (_, index) => `<th>${index + 1}</th>`).join("");
+      table.innerHTML = `
+        <thead>
+          <tr>
+            <th class="team-head">Team</th>
+            ${headCells}
+            <th>Proj</th>
+          </tr>
+        </thead>
+        <tbody></tbody>
+      `;
+
+      const body = table.querySelector("tbody");
+      for (const row of rows) {
+        const tr = document.createElement("tr");
+        const teamCell = document.createElement("td");
+        teamCell.className = "team-cell";
+        teamCell.innerHTML = `
+          <div class="team-name">
+            <span class="rank">${row.rank}</span>
+            <span class="badge">${row.shortName}</span>
+            <span>${row.name}</span>
+          </div>
+        `;
+        tr.appendChild(teamCell);
+
+        for (let index = 0; index < maxSlots; index += 1) {
+          const slot = row.slots[index];
+          const td = document.createElement("td");
+          td.className = "slot";
+          if (!slot) {
+            td.innerHTML = "";
+            tr.appendChild(td);
+            continue;
+          }
+
+          const resultClass = classForResult(slot.result);
+          if (slot.kind === "completed") {
+            td.classList.add("completed", resultClass);
+            td.innerHTML = `
+              <div class="slot-content">
+                <div class="points">${slot.projectedPoints}</div>
+                <div class="opponent">vs ${slot.opponent}</div>
+                <div class="result-text">${slot.result}</div>
+              </div>
+            `;
+          } else if (slot.locked) {
+            td.classList.add("completed");
+            td.innerHTML = `
+              <div class="slot-content">
+                <div class="date">${slot.date}</div>
+                <div class="points">${slot.projectedPoints}</div>
+                <div class="opponent">vs ${slot.opponent}</div>
+                <div class="result-text">Played</div>
+              </div>
+            `;
+          } else {
+            const button = document.createElement("button");
+            button.type = "button";
+            button.className = `future-button ${resultClass}`;
+            button.setAttribute("aria-label", `${row.shortName} ${slot.date} vs ${slot.opponent}`);
+            button.addEventListener("click", () => setPredictionFromCell(slot.fixtureId, row.id));
+            button.innerHTML = `
+              <div class="slot-content">
+                <div class="date">${slot.date}</div>
+                <div class="points">${slot.result ? slot.projectedPoints : "-"}</div>
+                <div class="opponent">vs ${slot.opponent}</div>
+                <div class="result-text">${slot.result || "Pick"}</div>
+              </div>
+            `;
+            td.appendChild(button);
+          }
+          tr.appendChild(td);
+        }
+
+        const projection = document.createElement("td");
+        projection.className = "projection-cell";
+        projection.textContent = row.projectedPoints;
+        tr.appendChild(projection);
+        body.appendChild(tr);
+      }
+    }
+
+    function renderStandings() {
+      const standings = engine.computeStandings(predictions, importedStandings, futureFixtureIds);
+      const staleNrrTeams = engine.teamsWithProjectedNrr(predictions);
+      standingsList.innerHTML = "";
+      standings.forEach((team, index) => {
+        const div = document.createElement("div");
+        div.className = `standing-row ${index < 4 ? "top-four" : ""}`;
+        const shouldShowSeedLabel = team.seedStatus === "top-two-nrr" || team.seedStatus === "playoff-nrr";
+        const nrrHtml = team.nrr === null
+          ? ""
+          : `<span class="nrr-value ${staleNrrTeams.has(team.id) ? "stale" : ""}">NRR ${team.nrr.toFixed(3)}</span>`;
+        div.innerHTML = `
+          <div class="standing-rank">${index + 1}</div>
+          <div>
+            <div class="standing-team">${team.shortName}</div>
+            <div class="subtitle">${shouldShowSeedLabel ? `${statusText(team.seedStatus)} · ` : ""}${nrrHtml}</div>
+          </div>
+          <div class="standing-points">${team.points}</div>
+        `;
+        standingsList.appendChild(div);
+      });
+
+      const hasTopTwoTie = standings.some((team) => team.seedStatus === "top-two-nrr");
+      const hasTopFourTie = standings.some((team) => team.seedStatus === "playoff-nrr");
+      if (hasTopTwoTie && hasTopFourTie) {
+        cutoffNote.textContent = "NRR/tiebreaker is needed at both the top-two qualifier cutoff and the fourth-place playoff cutoff.";
+      } else if (hasTopTwoTie) {
+        cutoffNote.textContent = "NRR/tiebreaker is needed at the top-two qualifier cutoff.";
+      } else if (hasTopFourTie) {
+        cutoffNote.textContent = "NRR/tiebreaker is needed at the fourth-place playoff cutoff.";
+      } else {
+        cutoffNote.textContent = "Current projection has point-only ordering for top two and top four.";
+      }
+    }
+
+    function renderFixtures() {
+      const labels = engine.classifyAllFixtures(predictions, importedStandings, futureFixtureIds);
+      fixturesList.innerHTML = "";
+      for (const fixture of engine.FUTURE_FIXTURES) {
+        const outcome = predictions[fixture.id];
+        const div = document.createElement("div");
+        div.className = "fixture-row";
+        const teams = fixture.teams.map((teamId) => engine.teamById[teamId].shortName);
+        const outcomeText = outcome
+          ? outcome.type === "win"
+            ? `${outcome.winner} win`
+            : outcome.type === "tie"
+              ? "Tie"
+              : "No result"
+          : "Unset";
+
+        div.innerHTML = `
+          <div class="fixture-title">
+            <span>${fixture.date}: ${teams[0]} vs ${teams[1]}</span>
+            <span class="subtitle">${outcomeText}</span>
+          </div>
+          <div class="fixture-tags">
+            ${fixture.teams.map((teamId) => {
+              const status = labels[fixture.id][teamId];
+              return `<span class="status ${status}">${engine.teamById[teamId].shortName}: ${statusText(status)}</span>`;
+            }).join("")}
+          </div>
+        `;
+        fixturesList.appendChild(div);
+      }
+    }
+
+    function render() {
+      renderTable();
+      renderStandings();
+      renderFixtures();
+    }
+
+    resetBtn.addEventListener("click", () => {
+      predictions = {};
+      render();
+    });
+
+    importBtn.addEventListener("click", () => {
+      const parsed = engine.parseStandingsText(importInput.value);
+      const count = Object.keys(parsed).length;
+      if (count === 0) {
+        importStatus.textContent = "No teams parsed. Paste copied standings text or OCR text that includes team names, PTS, NRR, and Next.";
+        return;
+      }
+      importedStandings = parsed;
+      futureFixtureIds = engine.deriveFutureFixtureIds(importedStandings);
+      predictions = Object.fromEntries(Object.entries(predictions).filter(([fixtureId]) => futureFixtureIds.has(fixtureId)));
+      importStatus.textContent = `Imported ${count} teams. ${futureFixtureIds.size} scheduled fixtures remain clickable. NRR is shown in standings.`;
+      render();
+    });
+
+    clearImportBtn.addEventListener("click", () => {
+      importedStandings = null;
+      futureFixtureIds = null;
+      importInput.value = "";
+      predictions = {};
+      importStatus.textContent = "Using built-in screenshot data.";
+      render();
+    });
+
+    render();
+  </script>
+</body>
+</html>
