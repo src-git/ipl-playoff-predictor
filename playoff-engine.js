@@ -103,16 +103,55 @@
 
   const teamById = Object.fromEntries(TEAMS.map((team) => [team.id, team]));
   const fixtureById = Object.fromEntries(FUTURE_FIXTURES.map((fixture) => [fixture.id, fixture]));
+  const FALLBACK_SEASON_DATA = {
+    source: {
+      name: "Built-in screenshot data",
+      url: "https://www.espncricinfo.com/series/ipl-2026-1510719/points-table-standings",
+    },
+    teams: TEAMS.map((team) => ({ ...team })),
+    futureFixtures: FUTURE_FIXTURES.map((fixture) => ({ ...fixture, teams: [...fixture.teams] })),
+    completedRows: cloneCompletedRows(COMPLETED_ROWS),
+    teamFutureOrder: cloneTeamFutureOrder(TEAM_FUTURE_ORDER),
+  };
   const teamNameAliases = new Map();
-  for (const team of TEAMS) {
-    teamNameAliases.set(team.name.toUpperCase(), team.id);
-    teamNameAliases.set(team.shortName.toUpperCase(), team.id);
+  rebuildLookups();
+
+  function cloneCompletedRows(rows) {
+    return Object.fromEntries(Object.entries(rows).map(([teamId, teamRows]) => [
+      teamId,
+      teamRows.map((row) => [...row]),
+    ]));
   }
-  teamNameAliases.set("MUMBAI INDIANS", "MI");
-  teamNameAliases.set("MUMBAIINDIANS", "MI");
-  teamNameAliases.set("KOLKATA KNIGHT RIDERS", "KKR");
-  teamNameAliases.set("LUCKNOW SUPER GIANTS", "LSG");
-  teamNameAliases.set("ROYAL CHALLENGERS BANGALORE", "RCB");
+
+  function cloneTeamFutureOrder(order) {
+    return Object.fromEntries(Object.entries(order).map(([teamId, fixtureIds]) => [teamId, [...fixtureIds]]));
+  }
+
+  function clearObject(object) {
+    for (const key of Object.keys(object)) delete object[key];
+  }
+
+  function rebuildLookups() {
+    clearObject(teamById);
+    clearObject(fixtureById);
+    teamNameAliases.clear();
+
+    for (const team of TEAMS) {
+      teamById[team.id] = team;
+      teamNameAliases.set(team.name.toUpperCase(), team.id);
+      teamNameAliases.set(team.shortName.toUpperCase(), team.id);
+    }
+
+    for (const fixture of FUTURE_FIXTURES) {
+      fixtureById[fixture.id] = fixture;
+    }
+
+    teamNameAliases.set("MUMBAI INDIANS", "MI");
+    teamNameAliases.set("MUMBAIINDIANS", "MI");
+    teamNameAliases.set("KOLKATA KNIGHT RIDERS", "KKR");
+    teamNameAliases.set("LUCKNOW SUPER GIANTS", "LSG");
+    teamNameAliases.set("ROYAL CHALLENGERS BANGALORE", "RCB");
+  }
 
   function clonePredictions(predictions) {
     return Object.fromEntries(Object.entries(predictions || {}).map(([key, value]) => [key, { ...value }]));
@@ -218,19 +257,29 @@
 
   function parseStandingsText(text) {
     const parsed = {};
-    const lines = String(text || "")
-      .split(/\r?\n/)
-      .map((line) => line.replace(/\s+/g, " ").trim())
-      .filter(Boolean);
+    const normalizedText = String(text || "").replace(/\s+/g, " ").trim();
+    const statsLookahead = "\\s+\\d+\\s+\\d+\\s+\\d+\\s+\\d+\\s+\\d+\\s+\\d+\\s+-?\\d";
+    const teamAnchors = TEAMS
+      .map((team) => {
+        const escapedName = team.name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+        const rowPattern = new RegExp(`(?:^|\\s)(?:\\d{1,2}\\s+)?${escapedName}(?=${statsLookahead})`, "i");
+        const match = normalizedText.match(rowPattern);
+        if (!match || match.index === undefined) return { team, index: -1 };
+        const teamOffset = match[0].toUpperCase().lastIndexOf(team.name.toUpperCase());
+        return {
+          team,
+          index: match.index + teamOffset,
+        };
+      })
+      .filter((anchor) => anchor.index >= 0)
+      .sort((a, b) => a.index - b.index);
 
-    for (const line of lines) {
-      const upperLine = line.toUpperCase();
-      const team = TEAMS.find((candidate) => upperLine.includes(candidate.name.toUpperCase()));
-      if (!team) continue;
-
-      const teamIndex = upperLine.indexOf(team.name.toUpperCase());
-      const afterTeam = line.slice(teamIndex + team.name.length).trim();
-      const match = afterTeam.match(/^(\d+)\s+(\d+)\s+(\d+)\s+(\d+)\s+(\d+)\s+(\d+)\s+(-?\d+(?:\.\d+)?)(.*)$/);
+    for (let index = 0; index < teamAnchors.length; index += 1) {
+      const { team } = teamAnchors[index];
+      const rowStart = teamAnchors[index].index + team.name.length;
+      const rowEnd = index + 1 < teamAnchors.length ? teamAnchors[index + 1].index : normalizedText.length;
+      const rowText = normalizedText.slice(rowStart, rowEnd).trim();
+      const match = rowText.match(/(?:^|\s)(\d+)\s+(\d+)\s+(\d+)\s+(\d+)\s+(\d+)\s+(\d+)\s+(-?\d+(?:\.\d+)?)(.*)$/);
       if (!match) continue;
 
       const [, matches, wins, losses, ties, noResults, points, nrr, rest] = match;
@@ -248,6 +297,245 @@
     }
 
     return parsed;
+  }
+
+  function decodeHtmlEntities(value) {
+    return String(value || "")
+      .replace(/&nbsp;/gi, " ")
+      .replace(/&amp;/gi, "&")
+      .replace(/&#39;/g, "'")
+      .replace(/&quot;/gi, '"')
+      .replace(/&lt;/gi, "<")
+      .replace(/&gt;/gi, ">");
+  }
+
+  function htmlToPlainText(value) {
+    return decodeHtmlEntities(String(value || "")
+      .replace(/<script[\s\S]*?<\/script>/gi, " ")
+      .replace(/<style[\s\S]*?<\/style>/gi, " ")
+      .replace(/<[^>]+>/g, " "));
+  }
+
+  function normalizeSourceText(value) {
+    return htmlToPlainText(value)
+      .replace(/\s+/g, " ")
+      .trim();
+  }
+
+  function escapeRegExp(value) {
+    return String(value).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  }
+
+  function findTeamPrefix(value, excludedTeamId) {
+    const normalized = String(value || "").trim().toUpperCase();
+    const candidates = [...TEAMS].sort((a, b) => b.name.length - a.name.length);
+    for (const team of candidates) {
+      if (team.id === excludedTeamId) continue;
+      if (normalized.startsWith(team.name.toUpperCase())) return team;
+      if (normalized.startsWith(team.shortName.toUpperCase())) return team;
+    }
+    return null;
+  }
+
+  function resultFromNdtvPoint(pointValue, resultText) {
+    const point = Number(pointValue);
+    if (point === 2) return "W";
+    if (point === 0) return "L";
+    if (point === 1) return /\btied\b/i.test(resultText) ? "T" : "NR";
+    return "";
+  }
+
+  function fixturePairKey(teamA, teamB) {
+    return [teamA, teamB].sort().join("-");
+  }
+
+  function parseNdtvMatches(sectionText, teamId, fixtureIdsByPair) {
+    const completedRows = [];
+    const futureFixtureIds = [];
+    let runningPoints = 0;
+    const matchPattern = /Match\s+(\d+)\s+([A-Z][a-z]{2})\s+(\d{1,2})\s+2026,\s*\([^)]+\)\s+([\s\S]*?)(?=Match\s+\d+\s+[A-Z][a-z]{2}\s+\d{1,2}\s+2026|$)/g;
+    let match;
+    while ((match = matchPattern.exec(sectionText)) !== null) {
+      const [, matchNumber, month, day, detail] = match;
+      const vsMatch = detail.match(/\bvs\s+(.+)/i);
+      if (!vsMatch) continue;
+
+      const afterVs = vsMatch[1].replace(/% Chance to Win.*/i, "").trim();
+      const opponent = findTeamPrefix(afterVs, teamId);
+      if (!opponent) continue;
+
+      const pointMatch = detail.match(/\bPoint\s+([+-]?\d+)/i);
+      if (pointMatch) {
+        const result = resultFromNdtvPoint(pointMatch[1], detail);
+        runningPoints += Number(pointMatch[1]);
+        completedRows.push([opponent.id, result, runningPoints]);
+        continue;
+      }
+
+      const pairKey = fixturePairKey(teamId, opponent.id);
+      if (!fixtureIdsByPair.has(pairKey)) {
+        fixtureIdsByPair.set(pairKey, {
+          id: `${teamId}-${opponent.id}`,
+          date: `${month} ${Number(day)}`,
+          matchNumber: Number(matchNumber),
+          teams: [teamId, opponent.id],
+        });
+      }
+      futureFixtureIds.push(fixtureIdsByPair.get(pairKey).id);
+    }
+    return { completedRows, futureFixtureIds };
+  }
+
+  function parseNdtvPointsTableText(text) {
+    const normalizedText = normalizeSourceText(text);
+    const rowAnchors = TEAMS
+      .map((team) => {
+        const pattern = new RegExp(
+          `(?:^|\\s)(\\d{1,2})\\s*\\|?\\s*${escapeRegExp(team.name)}\\s+${escapeRegExp(team.shortName)}\\s*\\|?\\s*` +
+          `(\\d+)\\s*\\|?\\s*(\\d+)\\s*\\|?\\s*(\\d+)\\s*\\|?\\s*(\\d+)\\s*\\|?\\s*(\\d+)\\s*\\|?\\s*(\\d+)\\s*\\|?\\s*([+-]?\\d+(?:\\.\\d+)?)`,
+          "i"
+        );
+        const match = normalizedText.match(pattern);
+        if (!match || match.index === undefined) return null;
+        return { team, match, index: match.index, rowEnd: match.index + match[0].length };
+      })
+      .filter(Boolean)
+      .sort((a, b) => a.index - b.index);
+
+    const fixtureIdsByPair = new Map();
+    const teams = [];
+    const completedRows = {};
+    const teamFutureOrder = {};
+
+    for (let index = 0; index < rowAnchors.length; index += 1) {
+      const anchor = rowAnchors[index];
+      const [, rank, matches, wins, losses, ties, noResults, points, nrr] = anchor.match;
+      const sectionEnd = index + 1 < rowAnchors.length ? rowAnchors[index + 1].index : normalizedText.length;
+      const sectionText = normalizedText.slice(anchor.rowEnd, sectionEnd);
+      const parsedMatches = parseNdtvMatches(sectionText, anchor.team.id, fixtureIdsByPair);
+
+      teams.push({
+        id: anchor.team.id,
+        name: anchor.team.name,
+        shortName: anchor.team.shortName,
+        currentPoints: Number(points),
+        nrr: Number(nrr),
+        rank: Number(rank),
+        matches: Number(matches),
+        wins: Number(wins),
+        losses: Number(losses),
+        ties: Number(ties),
+        noResults: Number(noResults),
+      });
+      completedRows[anchor.team.id] = parsedMatches.completedRows;
+      teamFutureOrder[anchor.team.id] = parsedMatches.futureFixtureIds;
+    }
+
+    const futureFixtures = [...fixtureIdsByPair.values()]
+      .sort((a, b) => a.matchNumber - b.matchNumber)
+      .map(({ matchNumber, ...fixture }) => fixture);
+
+    return {
+      source: {
+        name: "NDTV Sports IPL 2026 points table",
+        url: "https://sports.ndtv.com/ipl-2026/points-table",
+        fetchedAt: new Date().toISOString(),
+      },
+      teams: teams.sort((a, b) => a.rank - b.rank),
+      futureFixtures,
+      completedRows,
+      teamFutureOrder,
+    };
+  }
+
+  function validateSeasonData(data) {
+    const errors = [];
+    const teamIds = new Set((data && data.teams ? data.teams : []).map((team) => team.id));
+    const expectedTeamIds = new Set(TEAMS.map((team) => team.id));
+    for (const team of TEAMS) {
+      if (!teamIds.has(team.id)) errors.push(`Missing team ${team.id}`);
+    }
+    for (const teamId of teamIds) {
+      if (!expectedTeamIds.has(teamId)) errors.push(`Unknown team ${teamId}`);
+    }
+
+    const fixtureIds = new Set();
+    for (const fixture of data && data.futureFixtures ? data.futureFixtures : []) {
+      if (!fixture.id || !Array.isArray(fixture.teams) || fixture.teams.length !== 2) {
+        errors.push(`Invalid fixture ${fixture.id || "(missing id)"}`);
+        continue;
+      }
+      fixtureIds.add(fixture.id);
+      for (const teamId of fixture.teams) {
+        if (!teamIds.has(teamId)) errors.push(`Fixture ${fixture.id} references unknown team ${teamId}`);
+      }
+    }
+
+    for (const teamId of teamIds) {
+      if (!data.completedRows || !Array.isArray(data.completedRows[teamId])) {
+        errors.push(`Missing completed rows for ${teamId}`);
+      }
+      if (!data.teamFutureOrder || !Array.isArray(data.teamFutureOrder[teamId])) {
+        errors.push(`Missing future order for ${teamId}`);
+        continue;
+      }
+      for (const fixtureId of data.teamFutureOrder[teamId]) {
+        if (!fixtureIds.has(fixtureId)) errors.push(`Future order for ${teamId} references unknown fixture ${fixtureId}`);
+      }
+    }
+
+    return {
+      isValid: errors.length === 0,
+      errors,
+    };
+  }
+
+  function loadSeasonData(data) {
+    const validation = validateSeasonData(data);
+    if (!validation.isValid) {
+      throw new Error(`Invalid season data: ${validation.errors.join("; ")}`);
+    }
+
+    TEAMS.splice(0, TEAMS.length, ...data.teams.map((team) => ({
+      id: team.id,
+      name: team.name,
+      shortName: team.shortName,
+      currentPoints: team.currentPoints,
+      nrr: team.nrr,
+      rank: team.rank,
+    })));
+    FUTURE_FIXTURES.splice(0, FUTURE_FIXTURES.length, ...data.futureFixtures.map((fixture) => ({
+      id: fixture.id,
+      date: fixture.date,
+      teams: [...fixture.teams],
+    })));
+
+    clearObject(COMPLETED_ROWS);
+    for (const [teamId, rows] of Object.entries(data.completedRows)) {
+      COMPLETED_ROWS[teamId] = rows.map((row) => [...row]);
+    }
+
+    clearObject(TEAM_FUTURE_ORDER);
+    for (const [teamId, fixtureIds] of Object.entries(data.teamFutureOrder)) {
+      TEAM_FUTURE_ORDER[teamId] = [...fixtureIds];
+    }
+
+    rebuildLookups();
+    finalStateCache.clear();
+    return validation;
+  }
+
+  function validateStandingsImport(importedStandings) {
+    const missingTeamIds = TEAMS
+      .map((team) => team.id)
+      .filter((teamId) => !importedStandings || !importedStandings[teamId]);
+    const parsedCount = TEAMS.length - missingTeamIds.length;
+    return {
+      isComplete: missingTeamIds.length === 0,
+      parsedCount,
+      missingTeamIds,
+      missingTeamNames: missingTeamIds.map((teamId) => teamById[teamId].name),
+    };
   }
 
   function qualificationStatus(pointsByTeam, teamId) {
@@ -270,8 +558,12 @@
     return "playoff";
   }
 
-  function hasPredictions(predictions) {
-    return Object.keys(predictions || {}).length > 0;
+  function nrrForTeam(teamId, importedStandings) {
+    return importedStandings && importedStandings[teamId] ? importedStandings[teamId].nrr : teamById[teamId].nrr;
+  }
+
+  function hasResolvedNrr(teamId, importedStandings, staleNrrTeams) {
+    return Number.isFinite(nrrForTeam(teamId, importedStandings)) && !staleNrrTeams.has(teamId);
   }
 
   function teamsWithProjectedNrr(predictions) {
@@ -294,27 +586,50 @@
 
   function computeStandings(predictions, importedStandings, futureFixtureIds) {
     const points = computePointsMap(predictions || {}, importedStandings, futureFixtureIds);
-    const hasKnownNrr = TEAMS.every((team) => {
-      const nrr = importedStandings && importedStandings[team.id] ? importedStandings[team.id].nrr : team.nrr;
-      return Number.isFinite(nrr);
-    });
-    const shouldUseNrrAsResolved = hasKnownNrr && !hasPredictions(predictions);
+    const staleNrrTeams = teamsWithProjectedNrr(predictions || {});
     const standings = TEAMS.map((team) => ({
       ...team,
-      nrr: importedStandings && importedStandings[team.id] ? importedStandings[team.id].nrr : team.nrr,
+      nrr: nrrForTeam(team.id, importedStandings),
       points: points[team.id],
-      status: qualificationStatus(points, team.id),
-      seedStatus: playoffSeedStatus(points, team.id),
     })).sort((a, b) => b.points - a.points || b.nrr - a.nrr || a.rank - b.rank);
 
-    if (shouldUseNrrAsResolved) {
-      return standings.map((team, index) => ({
-        ...team,
-        seedStatus: rankedSeedStatus(index),
-      }));
+    const resolvedStandings = standings.map((team, index) => ({
+      ...team,
+      status: index < 4 ? "qualified" : "out",
+      seedStatus: rankedSeedStatus(index),
+    }));
+
+    for (let start = 0; start < resolvedStandings.length; start += 1) {
+      let end = start;
+      while (
+        end + 1 < resolvedStandings.length &&
+        resolvedStandings[end + 1].points === resolvedStandings[start].points
+      ) {
+        end += 1;
+      }
+
+      if (end > start) {
+        const tiedGroup = resolvedStandings.slice(start, end + 1);
+        const hasUnresolvedNrr = tiedGroup.some((team) => !hasResolvedNrr(team.id, importedStandings, staleNrrTeams));
+        if (hasUnresolvedNrr && start < 2 && end >= 2) {
+          for (let index = start; index <= end; index += 1) {
+            resolvedStandings[index].seedStatus = "top-two-nrr";
+          }
+        }
+        if (hasUnresolvedNrr && start < 4 && end >= 4) {
+          for (let index = start; index <= end; index += 1) {
+            resolvedStandings[index].status = "nrr";
+            if (resolvedStandings[index].seedStatus !== "top-two-nrr") {
+              resolvedStandings[index].seedStatus = "playoff-nrr";
+            }
+          }
+        }
+      }
+
+      start = end;
     }
 
-    return standings;
+    return resolvedStandings;
   }
 
   function buildTeamRows(predictions, importedStandings, futureFixtureIds) {
@@ -556,6 +871,7 @@
     FUTURE_FIXTURES,
     COMPLETED_ROWS,
     TEAM_FUTURE_ORDER,
+    FALLBACK_SEASON_DATA,
     fixtureById,
     teamById,
     opponentFor,
@@ -563,6 +879,10 @@
     resultForTeam,
     nextOutcomeForTeam,
     parseStandingsText,
+    parseNdtvPointsTableText,
+    validateStandingsImport,
+    validateSeasonData,
+    loadSeasonData,
     deriveFutureFixtureIds,
     computePointsMap,
     teamsWithProjectedNrr,

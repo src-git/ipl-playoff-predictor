@@ -88,6 +88,12 @@
       border-color: #aeb7c7;
     }
 
+    .action-button:disabled {
+      cursor: not-allowed;
+      opacity: 0.55;
+      background: #f4f5f7;
+    }
+
     .legend {
       display: flex;
       gap: 8px;
@@ -129,6 +135,51 @@
       color: var(--muted);
       font-size: 13px;
       font-weight: 650;
+    }
+
+    .import-status.ok {
+      color: #116131;
+    }
+
+    .import-status.error {
+      color: #8b241f;
+    }
+
+    .import-preview {
+      border: 1px solid var(--muted-line);
+      border-radius: 8px;
+      overflow: auto;
+      background: #fbfcfe;
+      max-height: 260px;
+    }
+
+    .import-preview:empty {
+      display: none;
+    }
+
+    .import-preview table {
+      min-width: 720px;
+      font-size: 13px;
+    }
+
+    .import-preview th {
+      height: 32px;
+      padding: 8px;
+      text-align: left;
+      position: sticky;
+      top: 0;
+      z-index: 1;
+    }
+
+    .import-preview td {
+      padding: 8px;
+      background: #fff;
+    }
+
+    .import-preview .changed {
+      background: #fff6d8;
+      color: #654400;
+      font-weight: 850;
     }
 
     .pill {
@@ -412,6 +463,11 @@
       background: #f1fbf4;
     }
 
+    .standing-row.eliminated {
+      border-color: #f0aaa3;
+      background: #fff1ef;
+    }
+
     .standing-rank {
       color: var(--muted);
       font-weight: 850;
@@ -553,15 +609,16 @@
 
     <section class="import-panel" aria-label="Import standings">
       <div>
-        <h2 class="panel-title">Import latest standings</h2>
-        <p class="subtitle">Paste copied table text or OCR text from a standings screenshot. The parser reads team, PTS, NRR, and Next.</p>
+        <h2 class="panel-title">Update standings</h2>
+        <p class="subtitle">Paste copied ESPN table text or OCR text. The preview updates immediately and Apply unlocks after all 10 teams are found.</p>
       </div>
-      <textarea id="standingsImport" placeholder="Example: 1 GUJARAT TITANS 12 8 4 0 0 16 0.551 ... vs KKR, CSK ..."></textarea>
+      <textarea id="standingsImport" placeholder="Paste standings text here. Example: GUJARAT TITANS 12 8 4 0 0 16 0.551 vs KKR, CSK"></textarea>
       <div class="import-actions">
-        <button class="action-button" id="importBtn" type="button">Apply import</button>
+        <button class="action-button" id="importBtn" type="button" disabled>Apply standings</button>
         <button class="action-button" id="clearImportBtn" type="button">Clear import</button>
-        <span class="import-status" id="importStatus">Using built-in screenshot data.</span>
+        <span class="import-status" id="importStatus">Using built-in fallback data.</span>
       </div>
+      <div class="import-preview" id="importPreview" aria-live="polite"></div>
     </section>
 
     <section class="layout">
@@ -604,8 +661,12 @@
     const importBtn = document.getElementById("importBtn");
     const clearImportBtn = document.getElementById("clearImportBtn");
     const importStatus = document.getElementById("importStatus");
+    const importPreview = document.getElementById("importPreview");
     let importedStandings = null;
     let futureFixtureIds = null;
+    let pendingImport = null;
+    let pendingImportValidation = null;
+    let seasonSourceStatus = "Using built-in fallback data. Run node fetch-standings.js to refresh NDTV data.";
 
     function classForResult(result) {
       if (result === "W") return "win";
@@ -629,6 +690,113 @@
       if (status === "nrr") return "NRR needed";
       if (status === "qualified") return "Top 4";
       return status;
+    }
+
+    function escapeHtml(value) {
+      return String(value)
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;")
+        .replace(/'/g, "&#039;");
+    }
+
+    function setImportStatus(message, kind) {
+      importStatus.textContent = message;
+      importStatus.className = `import-status ${kind || ""}`.trim();
+    }
+
+    function currentNextForTeam(teamId) {
+      if (importedStandings && importedStandings[teamId]) return importedStandings[teamId].next;
+      return engine.TEAM_FUTURE_ORDER[teamId]
+        .filter((fixtureId) => !futureFixtureIds || futureFixtureIds.has(fixtureId))
+        .map((fixtureId) => engine.opponentFor(engine.fixtureById[fixtureId], teamId));
+    }
+
+    function formatNext(next) {
+      return next.length ? next.join(", ") : "-";
+    }
+
+    function currentBaseStandingsMap() {
+      return Object.fromEntries(
+        engine.computeStandings({}, importedStandings, futureFixtureIds)
+          .map((team) => [team.id, team])
+      );
+    }
+
+    function renderImportPreview(parsed, validation) {
+      if (validation.parsedCount === 0) {
+        importPreview.innerHTML = "";
+        return;
+      }
+
+      const currentMap = currentBaseStandingsMap();
+      const rows = engine.TEAMS.map((team) => {
+        const parsedTeam = parsed[team.id];
+        if (!parsedTeam) {
+          return `
+            <tr>
+              <td>${team.shortName}</td>
+              <td colspan="3" class="changed">Missing</td>
+            </tr>
+          `;
+        }
+
+        const current = currentMap[team.id];
+        const currentNext = currentNextForTeam(team.id);
+        const pointsChanged = !current || parsedTeam.points !== current.points;
+        const nrrChanged = !current || parsedTeam.nrr !== current.nrr;
+        const nextChanged = formatNext(parsedTeam.next) !== formatNext(currentNext);
+
+        return `
+          <tr>
+            <td><strong>${team.shortName}</strong></td>
+            <td class="${pointsChanged ? "changed" : ""}">${parsedTeam.points}</td>
+            <td class="${nrrChanged ? "changed" : ""}">${parsedTeam.nrr.toFixed(3)}</td>
+            <td class="${nextChanged ? "changed" : ""}">${escapeHtml(formatNext(parsedTeam.next))}</td>
+          </tr>
+        `;
+      }).join("");
+
+      importPreview.innerHTML = `
+        <table>
+          <thead>
+            <tr>
+              <th>Team</th>
+              <th>PTS</th>
+              <th>NRR</th>
+              <th>Next</th>
+            </tr>
+          </thead>
+          <tbody>${rows}</tbody>
+        </table>
+      `;
+    }
+
+    function refreshImportPreview() {
+      pendingImport = engine.parseStandingsText(importInput.value);
+      pendingImportValidation = engine.validateStandingsImport(pendingImport);
+      renderImportPreview(pendingImport, pendingImportValidation);
+
+      if (!importInput.value.trim()) {
+        importBtn.disabled = true;
+        setImportStatus(importedStandings ? "Imported standings are active." : seasonSourceStatus);
+        return;
+      }
+
+      if (!pendingImportValidation.isComplete) {
+        importBtn.disabled = true;
+        if (pendingImportValidation.parsedCount === 0) {
+          setImportStatus("No teams found yet. Paste the copied table or OCR text.", "error");
+        } else {
+          setImportStatus(`Parsed ${pendingImportValidation.parsedCount}/10 teams. Missing: ${pendingImportValidation.missingTeamIds.join(", ")}.`, "error");
+        }
+        return;
+      }
+
+      const changedCells = importPreview.querySelectorAll(".changed").length;
+      importBtn.disabled = false;
+      setImportStatus(`Parsed all 10 teams. ${changedCells} changed field${changedCells === 1 ? "" : "s"} highlighted.`, "ok");
     }
 
     function setPredictionFromCell(fixtureId, teamId) {
@@ -736,7 +904,8 @@
       standingsList.innerHTML = "";
       standings.forEach((team, index) => {
         const div = document.createElement("div");
-        div.className = `standing-row ${index < 4 ? "top-four" : ""}`;
+        const isEliminated = !engine.canPossiblyQualify(team.id, predictions, importedStandings, futureFixtureIds);
+        div.className = `standing-row ${index < 4 ? "top-four" : ""} ${isEliminated ? "eliminated" : ""}`;
         const shouldShowSeedLabel = team.seedStatus === "top-two-nrr" || team.seedStatus === "playoff-nrr";
         const nrrHtml = team.nrr === null
           ? ""
@@ -761,7 +930,7 @@
       } else if (hasTopFourTie) {
         cutoffNote.textContent = "NRR/tiebreaker is needed at the fourth-place playoff cutoff.";
       } else {
-        cutoffNote.textContent = "Current projection has point-only ordering for top two and top four.";
+        cutoffNote.textContent = "Current projection resolves top two and top four with known points and NRR.";
       }
     }
 
@@ -808,18 +977,22 @@
       render();
     });
 
+    importInput.addEventListener("input", refreshImportPreview);
+
     importBtn.addEventListener("click", () => {
-      const parsed = engine.parseStandingsText(importInput.value);
-      const count = Object.keys(parsed).length;
-      if (count === 0) {
-        importStatus.textContent = "No teams parsed. Paste copied standings text or OCR text that includes team names, PTS, NRR, and Next.";
+      const parsed = pendingImport || engine.parseStandingsText(importInput.value);
+      const validation = pendingImportValidation || engine.validateStandingsImport(parsed);
+      if (!validation.isComplete) {
+        refreshImportPreview();
         return;
       }
       importedStandings = parsed;
       futureFixtureIds = engine.deriveFutureFixtureIds(importedStandings);
-      predictions = Object.fromEntries(Object.entries(predictions).filter(([fixtureId]) => futureFixtureIds.has(fixtureId)));
-      importStatus.textContent = `Imported ${count} teams. ${futureFixtureIds.size} scheduled fixtures remain clickable. NRR is shown in standings.`;
+      predictions = {};
       render();
+      renderImportPreview(parsed, validation);
+      importBtn.disabled = false;
+      setImportStatus(`Applied all 10 teams. ${futureFixtureIds.size} scheduled fixtures remain clickable. Predictions reset.`, "ok");
     });
 
     clearImportBtn.addEventListener("click", () => {
@@ -827,11 +1000,37 @@
       futureFixtureIds = null;
       importInput.value = "";
       predictions = {};
-      importStatus.textContent = "Using built-in screenshot data.";
+      pendingImport = null;
+      pendingImportValidation = null;
+      importPreview.innerHTML = "";
+      importBtn.disabled = true;
+      setImportStatus(seasonSourceStatus);
       render();
     });
 
-    render();
+    async function loadLatestSeasonData() {
+      try {
+        const response = await fetch("data/latest-ipl-2026.json", { cache: "no-store" });
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        const seasonData = await response.json();
+        engine.loadSeasonData(seasonData);
+        const sourceName = seasonData.source && seasonData.source.name ? seasonData.source.name : "latest data";
+        const fetchedAt = seasonData.source && seasonData.source.fetchedAt
+          ? ` (${new Date(seasonData.source.fetchedAt).toLocaleString()})`
+          : "";
+        seasonSourceStatus = `Loaded ${sourceName}${fetchedAt}.`;
+      } catch (error) {
+        seasonSourceStatus = "Using built-in fallback data. Run node fetch-standings.js to refresh NDTV data.";
+      }
+    }
+
+    async function init() {
+      await loadLatestSeasonData();
+      refreshImportPreview();
+      render();
+    }
+
+    init();
   </script>
 </body>
 </html>
